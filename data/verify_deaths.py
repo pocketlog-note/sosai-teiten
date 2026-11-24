@@ -1,14 +1,14 @@
-"""死亡数のデータ（CSV）を、出典の別の表の合計と照らして検算する。記事を書く前に必ず実行する。
+"""死亡数のデータ（CSV）を検算する。記事を書く前に必ず実行する。
 
 使い方（プロジェクトのルートで実行）:
   python -X utf8 data/verify_deaths.py
 
-照らす先（すべて厚生労働省「人口動態統計月報（概数）令和8（2026）年6月分」の中の値）:
-  - 第1表の「累計1月〜6月」: 2026年 766,746人、2025年 823,343人
-  - 第1表の6月: 2026年 113,355人、2025年 114,709人
-  - xlsx「過去1年間の動向」: 2025年12月時点の過去1年間＝2025年の年間死亡数 1,589,489人
-  - xlsx の過去1年間の合計の月ごとの増減 ＝ 月別死亡数の前年同月差（2026年1〜6月）
-  - 男＋女 ＝ 総数
+検算の内容:
+  [共通] 毎年の月について、「過去1年間の合計の増減 ＝ 月別死亡数の前年同月差」が成り立つ
+  [共通] 男＋女 ＝ 総数
+  [共通] ある年の12か月分の合計 ＝ その年12月時点の過去1年間の合計（その年が12か月そろっているとき）
+  [基準値] 月報（概数）令和8年6月分の中の値（第1表の累計 766,746人・823,343人、6月 113,355人・114,709人）
+          1〜6月がそろっている間だけ照らす。食い違うときは数字が改訂された可能性があるので、人が確かめる
 """
 import csv
 import sys
@@ -29,26 +29,34 @@ def main():
 
     def check(label, got, want):
         ok = got == want
-        print(("OK  " if ok else "NG  ") + f"{label}: {got:,}" + ("" if ok else f"（出典の値 {want:,}）"))
+        print(("OK  " if ok else "NG  ") + f"{label}: {got:,}" + ("" if ok else f"（期待する値 {want:,}）"))
         if not ok:
             ng.append(label)
 
-    check("2026年1〜6月の累計", sum(monthly[(2026, m)] for m in range(1, 7)), 766746)
-    check("2025年1〜6月の累計", sum(monthly[(2025, m)] for m in range(1, 7)), 823343)
-    check("2026年6月", monthly[(2026, 6)], 113355)
-    check("2025年6月", monthly[(2025, 6)], 114709)
-    check("2025年の年間（月別の合計）", sum(monthly[(2025, m)] for m in range(1, 13)), 1589489)
-    check("2025年12月時点の過去1年間の合計（xlsx）", int(roll[(2025, 12)]["total"]), 1589489)
-    prev = int(roll[(2025, 12)]["total"])
-    for m in range(1, 7):
-        now = int(roll[(2026, m)]["total"])
-        check(f"2026年{m}月の過去1年間の合計の増減 ＝ 前年同月差", now - prev, monthly[(2026, m)] - monthly[(2025, m)])
-        prev = now
-    for k, r in roll.items():
-        if int(r["male"]) + int(r["female"]) != int(r["total"]):
-            ng.append(f"{k} 男+女≠総数")
-            print("NG  男+女≠総数", k)
-    print("男女の合計が総数と一致:", "すべて OK" if not any("男+女" in x for x in ng) else "不一致あり")
+    # 基準値
+    if all((2026, m) in monthly and (2025, m) in monthly for m in range(1, 7)):
+        check("【基準】2026年1〜6月の累計", sum(monthly[(2026, m)] for m in range(1, 7)), 766746)
+        check("【基準】2025年1〜6月の累計", sum(monthly[(2025, m)] for m in range(1, 7)), 823343)
+        check("【基準】2026年6月", monthly[(2026, 6)], 113355)
+        check("【基準】2025年6月", monthly[(2025, 6)], 114709)
+
+    years = sorted({y for y, _ in monthly})
+    for y in years:
+        if all((y, m) in monthly for m in range(1, 13)) and (y, 12) in roll:
+            check(f"{y}年の年間（月別の合計）＝{y}年12月時点の過去1年間", sum(monthly[(y, m)] for m in range(1, 13)), int(roll[(y, 12)]["total"]))
+    for y in years:
+        if not all((y - 1, m) in monthly for m in range(1, 13)):
+            continue
+        for m in range(1, 13):
+            prev = (y, m - 1) if m > 1 else (y - 1, 12)
+            if (y, m) in monthly and (y, m) in roll and prev in roll:
+                now = int(roll[(y, m)]["total"]) - int(roll[prev]["total"])
+                check(f"{y}年{m}月の過去1年間の合計の増減 ＝ 前年同月差", now, monthly[(y, m)] - monthly[(y - 1, m)])
+    bad = [k for k, r in roll.items() if int(r["male"]) + int(r["female"]) != int(r["total"])]
+    for k in bad:
+        print("NG  男+女≠総数", k)
+        ng.append(f"{k} 男+女≠総数")
+    print("男女の合計が総数と一致:", "すべて OK" if not bad else "不一致あり")
     if ng:
         print("検算に失敗しました。記事を書かないでください")
         return 1
