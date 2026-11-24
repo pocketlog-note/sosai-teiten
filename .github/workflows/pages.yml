@@ -1,0 +1,54 @@
+# 葬祭ビジネス定点: main に push したときと毎朝6時(JST)に、site/ をビルドして GitHub Pages に公開する。
+# 毎朝の実行で、date が今日になった記事が自動で公開される（予約公開）。
+# ※ まだ GitHub のリポジトリはない。公開先が決まったら Pages の Source を「GitHub Actions」にする。
+name: build-and-deploy
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 21 * * *"   # UTC 21:00 = JST 06:00
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: 品質チェック（公開対象にエラーがあれば止める）
+        run: python check.py
+        env:
+          PYTHONIOENCODING: utf-8
+      - name: ビルド
+        run: python build.py
+        env:
+          PYTHONIOENCODING: utf-8
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
